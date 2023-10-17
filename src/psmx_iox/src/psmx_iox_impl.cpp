@@ -113,7 +113,6 @@ iox_psmx::iox_psmx(dds_psmx_instance_id_t identifier, const std::string& service
     .psmx_topics = nullptr
   },
   _support_keyed_topics{support_keyed_topics},
-  _service_name{iox::capro::IdString_t(iox::cxx::TruncateToCapacity, service_name)},
   _listener{}
 {
   uint64_t instance_hash = (uint64_t) ddsrt_random() << 32 | ddsrt_random();
@@ -121,6 +120,7 @@ iox_psmx::iox_psmx(dds_psmx_instance_id_t identifier, const std::string& service
   snprintf(iox_runtime_name, sizeof(iox_runtime_name), "CycloneDDS-iox_psmx-%016" PRIx64, instance_hash);
   iox::runtime::PoshRuntime::initRuntime(iox_runtime_name);
   _listener = std::unique_ptr<iox::popo::Listener>(new iox::popo::Listener());
+  _service_name = iox::capro::IdString_t(iox::TruncateToCapacity, service_name.c_str());
 
   if (node_id_override.has_value())
     _node_id = node_id_override.value();
@@ -163,7 +163,8 @@ void iox_psmx::discover_node_id(dds_psmx_node_identifier_t node_id_fallback)
   }
   else if (node_ids_present == 1)
   {
-    _node_id = to_node_identifier(outstr).value();
+    std::string tmp = std::string(outstr.c_str(), outstr.capacity());
+    _node_id = to_node_identifier(tmp).value();
   }
   else
   {
@@ -639,13 +640,13 @@ static std::optional<std::string> get_config_option_value(const char *conf, cons
 
 static std::optional<iox::log::LogLevel> to_loglevel(const std::string& str)
 {
-  if (str == "off") return iox::log::LogLevel::kOff;
-  if (str == "fatal") return iox::log::LogLevel::kFatal;
-  if (str == "error") return iox::log::LogLevel::kError;
-  if (str == "warn") return iox::log::LogLevel::kWarn;
-  if (str == "info") return iox::log::LogLevel::kInfo;
-  if (str == "debug") return iox::log::LogLevel::kDebug;
-  if (str == "verbose") return iox::log::LogLevel::kVerbose;
+  if (str == "off") return iox::log::LogLevel::OFF;
+  if (str == "fatal") return iox::log::LogLevel::FATAL;
+  if (str == "error") return iox::log::LogLevel::ERROR;
+  if (str == "warn") return iox::log::LogLevel::WARN;
+  if (str == "info") return iox::log::LogLevel::INFO;
+  if (str == "debug") return iox::log::LogLevel::DEBUG;
+  //  if (str == "verbose") return iox::log::LogLevel::kVerbose;
   return std::nullopt;
 }
 
@@ -677,7 +678,7 @@ dds_return_t iox_create_psmx(struct dds_psmx **psmx, dds_psmx_instance_id_t inst
     auto loglevel = to_loglevel (opt_loglevel.value());
     if (!loglevel.has_value())
       return DDS_RETCODE_ERROR;
-    iox::log::LogManager::GetLogManager().SetDefaultLogLevel(loglevel.value(), iox::log::LogLevelOutput::kHideLogLevel);
+    iox::log::Logger::init(iox::log::LogLevel::ERROR);
   }
 
   auto opt_service_name = get_config_option_value(config, "SERVICE_NAME");
