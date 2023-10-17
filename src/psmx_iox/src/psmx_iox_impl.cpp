@@ -23,7 +23,8 @@
 #include "dds/ddsc/dds_loaned_sample.h"
 #include "dds/ddsc/dds_psmx.h"
 
-#include "iceoryx_hoofs/posix_wrapper/signal_watcher.hpp"
+#include "iceoryx_dust/posix_wrapper/signal_watcher.hpp"
+#include "iceoryx_hoof/posix_wrapper/signal_handler.hpp"
 #include "iceoryx_posh/popo/untyped_publisher.hpp"
 #include "iceoryx_posh/popo/untyped_subscriber.hpp"
 #include "iceoryx_posh/popo/listener.hpp"
