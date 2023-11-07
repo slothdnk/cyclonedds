@@ -717,7 +717,7 @@ void ddsi_xmsg_setdst_prd (struct ddsi_xmsg *m, const struct ddsi_proxy_reader *
   if (!prd->redundant_networking)
   {
     ddsi_xlocator_t loc;
-    ddsi_addrset_any_uc_else_mc_nofail (prd->c.as, &loc);
+    ddsi_addrset_any_uc (prd->c.as, &loc);
     ddsi_xmsg_setdst1 (prd->e.gv, m, &prd->e.guid.prefix, &loc);
   }
   else
@@ -738,7 +738,7 @@ void ddsi_xmsg_setdst_pwr (struct ddsi_xmsg *m, const struct ddsi_proxy_writer *
   if (!pwr->redundant_networking)
   {
     ddsi_xlocator_t loc;
-    ddsi_addrset_any_uc_else_mc_nofail (pwr->c.as, &loc);
+    ddsi_addrset_any_uc (pwr->c.as, &loc);
     ddsi_xmsg_setdst1 (pwr->e.gv, m, &pwr->e.guid.prefix, &loc);
   }
   else
@@ -1179,7 +1179,6 @@ static void ddsi_xpack_send1v (const ddsi_xlocator_t *loc, void * varg)
 static void ddsi_xpack_send_real (struct ddsi_xpack *xp)
 {
   struct ddsi_domaingv const * const gv = xp->gv;
-  size_t calls;
 
   assert (xp->msgfrags == NULL || xp->msgfrags->niov <= DDSI_XMSG_MAX_MESSAGE_IOVECS);
 
@@ -1200,23 +1199,34 @@ static void ddsi_xpack_send_real (struct ddsi_xpack *xp)
     }
   }
 
+  size_t calls = 0;
   GVTRACE (" [");
-  if (xp->dstmode == NN_XMSG_DST_ONE)
+  switch (xp->dstmode)
   {
-    calls = 1;
-    (void) ddsi_xpack_send1 (&xp->dstaddr.loc, xp);
-  }
-  else
-  {
-    /* Send to all addresses in as - as ultimately references the writer's
-       address set, which is currently replaced rather than changed whenever
-       it is updated, but that might not be something we want to guarantee */
-    calls = 0;
-    if (xp->dstaddr.all.as)
-    {
-      calls = ddsi_addrset_forall_count (xp->dstaddr.all.as, ddsi_xpack_send1v, xp);
-      ddsi_unref_addrset (xp->dstaddr.all.as);
-    }
+    case NN_XMSG_DST_UNSET:
+      assert (0);
+      break;
+    case NN_XMSG_DST_ONE:
+      (void) ddsi_xpack_send1 (&xp->dstaddr.loc, xp);
+      calls++;
+      break;
+    case NN_XMSG_DST_ALL:
+      /* Send to all addresses in as - as ultimately references the writer's
+         address set, which is currently replaced rather than changed whenever
+         it is updated, but that might not be something we want to guarantee */
+      if (xp->dstaddr.all.as)
+      {
+        calls = ddsi_addrset_forall_count (xp->dstaddr.all.as, ddsi_xpack_send1v, xp);
+        ddsi_unref_addrset (xp->dstaddr.all.as);
+      }
+      break;
+    case NN_XMSG_DST_ALL_UC:
+      if (xp->dstaddr.all_uc.as)
+      {
+        calls = ddsi_addrset_forall_uc_count (xp->dstaddr.all_uc.as, ddsi_xpack_send1v, xp);
+        ddsi_unref_addrset (xp->dstaddr.all_uc.as);
+      }
+      break;
   }
   GVTRACE (" ]\n");
   if (calls)
@@ -1228,8 +1238,6 @@ static void ddsi_xpack_send_real (struct ddsi_xpack *xp)
 }
 
 #define SENDQ_MAX 200
-#define SENDQ_HW 10
-#define SENDQ_LW 0
 
 static uint32_t ddsi_xpack_sendq_thread (void *vgv)
 {
@@ -1249,7 +1257,7 @@ static uint32_t ddsi_xpack_sendq_thread (void *vgv)
     else
     {
       gv->sendq_head = xp->sendq_next;
-      if (--gv->sendq_length == SENDQ_LW)
+      if (--gv->sendq_length == 0)
         ddsrt_cond_broadcast (&gv->sendq_cond);
       ddsrt_mutex_unlock (&gv->sendq_lock);
       ddsi_xpack_send_real (xp);
@@ -1298,9 +1306,7 @@ void ddsi_xpack_sendq_fini (struct ddsi_domaingv *gv)
 void ddsi_xpack_send (struct ddsi_xpack *xp, bool immediately)
 {
   if (!xp->async_mode)
-  {
     ddsi_xpack_send_real (xp);
-  }
   else
   {
     struct ddsi_domaingv * const gv = xp->gv;
@@ -1315,18 +1321,14 @@ void ddsi_xpack_send (struct ddsi_xpack *xp, bool immediately)
     ddsi_xpack_reinit (xp);
     xp1->sendq_next = NULL;
     ddsrt_mutex_lock (&gv->sendq_lock);
-    if (immediately || gv->sendq_length > SENDQ_LW)
+    if (immediately || gv->sendq_length == 0)
       ddsrt_cond_broadcast (&gv->sendq_cond);
     if (gv->sendq_length >= SENDQ_MAX)
-    {
-        ddsrt_cond_wait (&gv->sendq_cond, &gv->sendq_lock);
-    }
+      ddsrt_cond_wait (&gv->sendq_cond, &gv->sendq_lock);
     if (gv->sendq_head)
       gv->sendq_tail->sendq_next = xp1;
     else
-    {
       gv->sendq_head = xp1;
-    }
     gv->sendq_tail = xp1;
     gv->sendq_length++;
     ddsrt_mutex_unlock (&gv->sendq_lock);
